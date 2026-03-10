@@ -1,18 +1,34 @@
-# documents/views.py
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.db.models import Q
+
 from .models import Document
 from .serializers import DocumentSerializer
 from accounts.permissions import IsAdmin, IsApprovedClient
+from logs.utils import log_action
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
     serializer_class = DocumentSerializer
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update", "destroy"):
+        # Admins can do everything
+        # Advocates can create and read; cannot delete or update
+        # Clients/judges can only read
+        if self.action == "destroy":
             return [IsAdmin()]
+        if self.action in ("create", "update", "partial_update"):
+            return [IsAuthenticated(), IsApprovedClient()]
         return [IsAuthenticated(), IsApprovedClient()]
+
+    def create(self, request, *args, **kwargs):
+        # Only admin and advocates can upload
+        if request.user.role not in ("admin", "advocate"):
+            return Response({"detail": "Only admins and advocates can upload documents."}, status=403)
+        response = super().create(request, *args, **kwargs)
+        log_action(request, "upload_document", f"Uploaded document: {request.data.get('title', '')}")
+        return response
 
     def get_queryset(self):
         user = self.request.user
@@ -26,7 +42,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 is_visible_to_client=True,
             )
         elif user.role == "advocate":
-            from django.db.models import Q
             qs = Document.objects.filter(
                 Q(case__client_advocate=user) | Q(case__opposition_advocate=user)
             )
@@ -39,6 +54,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(case_id=case_id)
 
         return qs.select_related("case", "uploaded_by")
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        log_action(request, "view_document", f"Viewed document {kwargs.get('pk')}")
+        return response
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()

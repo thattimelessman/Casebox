@@ -1,333 +1,214 @@
-import { useState, useEffect, useContext } from "react";
-import { AuthContext } from "../../context/AuthContext";
-import api from "../../api/axios";
+import { useState, useEffect, useCallback } from "react";
+import { casesAPI, usersAPI, getErrorMessage } from "../../api";
+import {
+  Card, CardBody, CardHeader, DataTable, Badge, Btn,
+  Modal, Input, Select, Textarea, FormRow, SearchBar,
+  ProgressBar, SectionLabel, EmptyState, toast,
+} from "../../components/ui";
+import { SketchNotepad } from "../../illustrations/Sketches";
 
-export default function CasesPage() {
-  const { user } = useContext(AuthContext);
-  const [cases, setCases] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "" });
-  const [submitting, setSubmitting] = useState(false);
-  const [selectedCase, setSelectedCase] = useState(null);
+const TYPES    = ["civil","criminal","family","property","labour","commercial","constitutional","other"];
+const STATUSES = ["ongoing","adjourned","judgement_reserved","closed","disposed"];
+const PRIOS    = ["low","medium","high","urgent"];
 
-  const fetchCases = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/api/cases/");
-      setCases(Array.isArray(res.data) ? res.data : res.data.results || []);
+const emptyForm = {
+  case_no:"", case_title:"", case_type:"civil", priority:"medium",
+  court_name:"", court_city:"", status:"ongoing", progress:0,
+  client:"", client_advocate:"", opposition_advocate:"", judge:"",
+  filing_date:"", next_hearing_date:"", last_hearing_date:"",
+  case_summary:"", last_verdict:"", tags:"", is_visible_to_client:true,
+};
 
-    } catch (err) {
-      setError("Failed to load cases.");
-    } finally {
-      setLoading(false);
-    }
-  };
+export default function AdminCasesPage({ setPage, setDetailCase }) {
+  const [cases, setCases]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [q, setQ]               = useState("");
+  const [filterStatus, setFS]   = useState("");
+  const [filterType, setFT]     = useState("");
+  const [filterPrio, setFP]     = useState("");
+  const [modal, setModal]       = useState(false);
+  const [editing, setEditing]   = useState(null);
+  const [form, setForm]         = useState(emptyForm);
+  const [saving, setSaving]     = useState(false);
 
+  const [advocates, setAdvocates] = useState([]);
+  const [clients, setClients]     = useState([]);
+  const [judges, setJudges]       = useState([]);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    casesAPI.list({ search: q, status: filterStatus, case_type: filterType, priority: filterPrio })
+      .then(r => setCases(r.data))
+      .catch(() => toast("Failed to load cases.", "error"))
+      .finally(() => setLoading(false));
+  }, [q, filterStatus, filterType, filterPrio]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Load role lists for dropdowns (once)
   useEffect(() => {
-    fetchCases();
+    usersAPI.byRole("advocate").then(r => setAdvocates(r.data)).catch(() => {});
+    usersAPI.byRole("client").then(r => setClients(r.data)).catch(() => {});
+    usersAPI.byRole("judge").then(r => setJudges(r.data)).catch(() => {});
   }, []);
 
-  const filteredCases =
-    filter === "all" ? cases : cases.filter((c) => c.status === filter);
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  const handleCreate = async () => {
-    if (!form.title.trim()) return;
-    setSubmitting(true);
+  const openCreate = () => { setEditing(null); setForm(emptyForm); setModal(true); };
+  const openEdit   = c  => {
+    setEditing(c.id);
+    setForm({
+      ...emptyForm, ...c,
+      client:               c.client              || "",
+      client_advocate:      c.client_advocate      || "",
+      opposition_advocate:  c.opposition_advocate  || "",
+      judge:                c.judge                || "",
+    });
+    setModal(true);
+  };
+
+  const save = async () => {
+    if (!form.case_no || !form.case_title || !form.court_name || !form.client) {
+      toast("Case No, Title, Court, and Client are required.", "error"); return;
+    }
+    setSaving(true);
     try {
-      await api.post("/api/cases/", form);
-      setForm({ title: "", description: "" });
-      setShowForm(false);
-      fetchCases();
+      if (editing) {
+        await casesAPI.update(editing, form);
+        toast("Case updated.", "success");
+      } else {
+        await casesAPI.create(form);
+        toast("Case created.", "success");
+      }
+      setModal(false);
+      load();
     } catch (err) {
-      setError("Failed to create case.");
+      toast(getErrorMessage(err), "error");
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  const handleStatusChange = async (caseId, newStatus) => {
-    try {
-      await api.patch(`/api/cases/${caseId}/`, { status: newStatus });
-      fetchCases();
-    } catch (err) {
-      setError("Failed to update case status.");
-    }
-  };
-
-  const statusColor = {
-    pending: "#f59e0b",
-    approved: "#10b981",
-    rejected: "#ef4444",
-  };
-
-  const statusBg = {
-    pending: "rgba(245,158,11,0.1)",
-    approved: "rgba(16,185,129,0.1)",
-    rejected: "rgba(239,68,68,0.1)",
-  };
-
-  if (selectedCase) {
-    return (
-      <div style={{ padding: "32px", fontFamily: "'Cormorant Garamond', serif" }}>
-        <button
-          onClick={() => setSelectedCase(null)}
-          style={{
-            background: "none", border: "none", cursor: "pointer",
-            color: "#7a7a8a", fontSize: "0.85rem", letterSpacing: "0.08em",
-            textTransform: "uppercase", marginBottom: 24, padding: 0,
-          }}
-        >
-          ← Back to Cases
-        </button>
-        <div style={{ background: "#fff", borderRadius: 12, padding: 32, border: "1px solid #e8e4de" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
-            <div>
-              <h2 style={{ fontSize: "1.6rem", fontWeight: 600, color: "#1a1a2e", margin: 0 }}>
-                {selectedCase.title}
-              </h2>
-              <p style={{ color: "#7a7a8a", marginTop: 4, fontSize: "0.9rem" }}>
-                Case #{selectedCase.id} · Created {new Date(selectedCase.created_at).toLocaleDateString()}
-              </p>
-            </div>
-            <span style={{
-              padding: "6px 14px", borderRadius: 20, fontSize: "0.8rem", fontWeight: 600,
-              color: statusColor[selectedCase.status], background: statusBg[selectedCase.status],
-              textTransform: "uppercase", letterSpacing: "0.06em",
-            }}>
-              {selectedCase.status}
-            </span>
-          </div>
-          <div style={{ marginBottom: 24 }}>
-            <p style={{ color: "#4a4a5a", lineHeight: 1.7, fontSize: "1rem" }}>
-              {selectedCase.description || "No description provided."}
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 12, borderTop: "1px solid #e8e4de", paddingTop: 20 }}>
-            <div style={{ flex: 1 }}>
-              <p style={{ color: "#7a7a8a", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Created By</p>
-              <p style={{ color: "#1a1a2e", fontWeight: 500 }}>{selectedCase.created_by_name || selectedCase.created_by || "—"}</p>
-            </div>
-            <div style={{ flex: 1 }}>
-              <p style={{ color: "#7a7a8a", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Assigned Judge</p>
-              <p style={{ color: "#1a1a2e", fontWeight: 500 }}>{selectedCase.assigned_judge_name || selectedCase.assigned_judge || "Unassigned"}</p>
-            </div>
-          </div>
-          {user?.role === "admin" && selectedCase.status === "pending" && (
-            <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
-              <button
-                onClick={() => { handleStatusChange(selectedCase.id, "approved"); setSelectedCase(null); }}
-                style={{
-                  padding: "10px 24px", background: "#10b981", color: "#fff",
-                  border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600,
-                  fontFamily: "inherit",
-                }}
-              >
-                Approve Case
-              </button>
-              <button
-                onClick={() => { handleStatusChange(selectedCase.id, "rejected"); setSelectedCase(null); }}
-                style={{
-                  padding: "10px 24px", background: "#ef4444", color: "#fff",
-                  border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600,
-                  fontFamily: "inherit",
-                }}
-              >
-                Reject Case
-              </button>
-            </div>
-          )}
-        </div>
+  const cols = [
+    { label:"Case No",   render: c => <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:"0.78rem", color:"#243460" }}>{c.case_no}</span> },
+    { label:"Title",     render: c => (
+      <div>
+        <div style={{ fontSize:"0.86rem", fontWeight:500, color:"#1a1a2e" }}>{c.case_title}</div>
+        <div style={{ fontSize:"0.73rem", color:"#7a7a8a" }}>{c.court_name}</div>
       </div>
-    );
-  }
+    )},
+    { label:"Type",      render: c => <Badge label={c.case_type} variant={c.case_type} /> },
+    { label:"Priority",  render: c => <Badge label={c.priority}  variant={c.priority}  /> },
+    { label:"Client",    render: c => <span style={{ fontSize:"0.84rem" }}>{c.client_name || "—"}</span> },
+    { label:"Hearing",   render: c => <span style={{ fontSize:"0.8rem", color:c.next_hearing_date?"#243460":"#7a7a8a" }}>{c.next_hearing_date || "—"}</span> },
+    { label:"Progress",  render: c => <div style={{ width:100 }}><ProgressBar value={c.progress} /></div> },
+    { label:"Status",    render: c => <Badge label={c.status} variant={c.status} /> },
+    { label:"",          render: c => (
+      <Btn variant="ghost" size="sm" onClick={e => { e.stopPropagation(); openEdit(c); }}>Edit</Btn>
+    )},
+  ];
 
   return (
-    <div style={{ padding: "32px", fontFamily: "'Cormorant Garamond', serif" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
+    <div>
+      <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:24 }}>
         <div>
-          <h1 style={{ fontSize: "1.8rem", fontWeight: 700, color: "#1a1a2e", margin: 0 }}>Cases</h1>
-          <p style={{ color: "#7a7a8a", marginTop: 4, fontSize: "0.95rem" }}>
-            {cases.length} total case{cases.length !== 1 ? "s" : ""}
-          </p>
+          <SectionLabel>Case Management</SectionLabel>
+          <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744" }}>
+            All <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Cases</em>
+          </h1>
         </div>
-        {(user?.role === "admin" || user?.role === "advocate") && (
-          <button
-            onClick={() => setShowForm(!showForm)}
-            style={{
-              padding: "10px 22px", background: "#4a6cf7", color: "#fff",
-              border: "none", borderRadius: 8, cursor: "pointer",
-              fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, fontSize: "0.95rem",
-            }}
-          >
-            + New Case
-          </button>
-        )}
+        <Btn variant="sage" onClick={openCreate}>+ New Case</Btn>
       </div>
 
-      {/* New Case Form */}
-      {showForm && (
-        <div style={{
-          background: "#fff", borderRadius: 12, padding: 24, marginBottom: 24,
-          border: "1px solid #e8e4de", boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
-        }}>
-          <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#1a1a2e", marginBottom: 16 }}>
-            Create New Case
-          </h3>
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", color: "#7a7a8a", fontSize: "0.85rem", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Case Title *
-            </label>
-            <input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="Enter case title"
-              style={{
-                width: "100%", padding: "10px 14px", border: "1px solid #ddd",
-                borderRadius: 8, fontSize: "1rem", fontFamily: "inherit",
-                boxSizing: "border-box", outline: "none",
-              }}
-            />
+      <Card noPad style={{ marginBottom:14 }}>
+        <CardBody style={{ padding:"12px 18px" }}>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <SearchBar value={q} onChange={v => setQ(v)} placeholder="Search case no, title, court…" style={{ flex:"1 1 220px" }} />
+            {[
+              { val:filterStatus, set:setFS, opts:STATUSES, label:"All Statuses" },
+              { val:filterType,   set:setFT, opts:TYPES,    label:"All Types" },
+              { val:filterPrio,   set:setFP, opts:PRIOS,    label:"All Priorities" },
+            ].map((f,i) => (
+              <select key={i} value={f.val} onChange={e=>f.set(e.target.value)} style={{
+                padding:"8px 12px", border:"1.5px solid #d6cfc2", borderRadius:6,
+                fontFamily:"'DM Sans',sans-serif", fontSize:"0.84rem", background:"#fff",
+              }}>
+                <option value="">{f.label}</option>
+                {f.opts.map(o=><option key={o} value={o}>{o.replace(/_/g," ")}</option>)}
+              </select>
+            ))}
           </div>
-          <div style={{ marginBottom: 18 }}>
-            <label style={{ display: "block", color: "#7a7a8a", fontSize: "0.85rem", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Description
-            </label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Brief case description..."
-              rows={3}
-              style={{
-                width: "100%", padding: "10px 14px", border: "1px solid #ddd",
-                borderRadius: 8, fontSize: "1rem", fontFamily: "inherit",
-                boxSizing: "border-box", resize: "vertical", outline: "none",
-              }}
-            />
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              onClick={handleCreate}
-              disabled={submitting || !form.title.trim()}
-              style={{
-                padding: "10px 22px", background: submitting ? "#ccc" : "#4a6cf7",
-                color: "#fff", border: "none", borderRadius: 8, cursor: submitting ? "not-allowed" : "pointer",
-                fontFamily: "inherit", fontWeight: 600,
-              }}
-            >
-              {submitting ? "Creating..." : "Create Case"}
-            </button>
-            <button
-              onClick={() => { setShowForm(false); setForm({ title: "", description: "" }); }}
-              style={{
-                padding: "10px 22px", background: "none", border: "1px solid #ddd",
-                borderRadius: 8, cursor: "pointer", fontFamily: "inherit", color: "#7a7a8a",
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+        </CardBody>
+      </Card>
 
-      {/* Filter Tabs */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {["all", "pending", "approved", "rejected"].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            style={{
-              padding: "7px 16px", borderRadius: 20, border: "1px solid",
-              borderColor: filter === f ? "#4a6cf7" : "#e8e4de",
-              background: filter === f ? "#4a6cf7" : "#fff",
-              color: filter === f ? "#fff" : "#7a7a8a",
-              cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem",
-              textTransform: "capitalize", fontWeight: filter === f ? 600 : 400,
-            }}
-          >
-            {f === "all" ? `All (${cases.length})` : `${f.charAt(0).toUpperCase() + f.slice(1)} (${cases.filter((c) => c.status === f).length})`}
-          </button>
-        ))}
-      </div>
+      <Card noPad>
+        {loading
+          ? <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading cases…</div>
+          : cases.length === 0
+            ? <EmptyState icon={<SketchNotepad size={64} />} title="No cases found" desc="Try adjusting your search or create a new case." />
+            : <DataTable columns={cols} rows={cases} onRowClick={c => { setDetailCase(c.id); setPage("case-detail"); }} />
+        }
+        <div style={{ padding:"10px 16px", borderTop:"1px solid #ede8df", fontSize:"0.74rem", color:"#7a7a8a" }}>
+          {cases.length} cases
+        </div>
+      </Card>
 
-      {/* Error */}
-      {error && (
-        <div style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444", padding: "12px 16px", borderRadius: 8, marginBottom: 16, fontSize: "0.9rem" }}>
-          {error}
-        </div>
-      )}
-
-      {/* Cases List */}
-      {loading ? (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#7a7a8a" }}>
-          Loading cases...
-        </div>
-      ) : filteredCases.length === 0 ? (
-        <div style={{
-          textAlign: "center", padding: "60px 0", color: "#7a7a8a",
-          background: "#fff", borderRadius: 12, border: "1px solid #e8e4de",
-        }}>
-          <div style={{ fontSize: "2rem", marginBottom: 12 }}>📁</div>
-          <p style={{ fontSize: "1.1rem" }}>No {filter !== "all" ? filter : ""} cases found.</p>
-          {(user?.role === "admin" || user?.role === "advocate") && (
-            <button
-              onClick={() => setShowForm(true)}
-              style={{
-                marginTop: 16, padding: "10px 22px", background: "#4a6cf7",
-                color: "#fff", border: "none", borderRadius: 8, cursor: "pointer",
-                fontFamily: "inherit", fontWeight: 600,
-              }}
-            >
-              Create First Case
-            </button>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {filteredCases.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setSelectedCase(c)}
-              style={{
-                background: "#fff", borderRadius: 12, padding: "20px 24px",
-                border: "1px solid #e8e4de", cursor: "pointer",
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                transition: "box-shadow 0.2s",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.08)")}
-              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
-            >
-              <div style={{ flex: 1 }}>
-                <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#1a1a2e", margin: 0 }}>
-                  {c.title}
-                </h3>
-                <p style={{ color: "#7a7a8a", fontSize: "0.88rem", marginTop: 4, marginBottom: 0 }}>
-                  Case #{c.id} · {new Date(c.created_at).toLocaleDateString()}
-                  {c.created_by_name ? ` · By ${c.created_by_name}` : ""}
-                </p>
-                {c.description && (
-                  <p style={{ color: "#4a4a5a", fontSize: "0.9rem", marginTop: 6, marginBottom: 0, maxWidth: 500 }}>
-                    {c.description.length > 100 ? c.description.slice(0, 100) + "…" : c.description}
-                  </p>
-                )}
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                <span style={{
-                  padding: "5px 12px", borderRadius: 20, fontSize: "0.78rem", fontWeight: 600,
-                  color: statusColor[c.status], background: statusBg[c.status],
-                  textTransform: "uppercase", letterSpacing: "0.06em",
-                }}>
-                  {c.status}
-                </span>
-                <span style={{ color: "#ccc", fontSize: "1.2rem" }}>›</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <Modal open={modal} onClose={() => setModal(false)}
+        title={editing ? "Edit Case" : "Create New Case"} size="lg"
+        footer={<>
+          <Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn>
+          <Btn variant="sage"  onClick={save} disabled={saving}>{saving ? "Saving…" : editing ? "Save Changes" : "Create Case"}</Btn>
+        </>}>
+        <FormRow>
+          <Input label="Case Number *" id="cno" value={form.case_no}    onChange={set("case_no")}    placeholder="DEL/CIV/2026/001" />
+          <Input label="Case Title *"  id="ct"  value={form.case_title} onChange={set("case_title")} placeholder="Plaintiff vs. Defendant" />
+        </FormRow>
+        <FormRow>
+          <Select label="Case Type" id="ctype" value={form.case_type} onChange={set("case_type")}>
+            {TYPES.map(t=><option key={t} value={t}>{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
+          </Select>
+          <Select label="Priority" id="cprio" value={form.priority} onChange={set("priority")}>
+            {PRIOS.map(p=><option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>)}
+          </Select>
+        </FormRow>
+        <FormRow>
+          <Input label="Court Name *" id="crt"  value={form.court_name} onChange={set("court_name")} placeholder="Delhi High Court" />
+          <Input label="Court City"   id="city" value={form.court_city} onChange={set("court_city")} placeholder="Delhi" />
+        </FormRow>
+        <FormRow>
+          <Select label="Client *" id="cli" value={form.client} onChange={set("client")}>
+            <option value="">Select client…</option>
+            {clients.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </Select>
+          <Select label="Client Advocate" id="cadv" value={form.client_advocate} onChange={set("client_advocate")}>
+            <option value="">Select advocate…</option>
+            {advocates.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </Select>
+        </FormRow>
+        <FormRow>
+          <Select label="Opposition Advocate" id="oadv" value={form.opposition_advocate} onChange={set("opposition_advocate")}>
+            <option value="">None</option>
+            {advocates.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </Select>
+          <Select label="Judge" id="jdg" value={form.judge} onChange={set("judge")}>
+            <option value="">Select judge…</option>
+            {judges.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </Select>
+        </FormRow>
+        <FormRow>
+          <Input label="Filing Date"   id="fd"  type="date" value={form.filing_date}       onChange={set("filing_date")} />
+          <Input label="Next Hearing"  id="nhd" type="date" value={form.next_hearing_date} onChange={set("next_hearing_date")} />
+        </FormRow>
+        <FormRow>
+          <Select label="Status" id="cst" value={form.status} onChange={set("status")}>
+            {STATUSES.map(s=><option key={s} value={s}>{s.replace(/_/g," ")}</option>)}
+          </Select>
+          <Input label="Progress (0-100)" id="prog" type="number" value={form.progress} onChange={set("progress")} />
+        </FormRow>
+        <Textarea label="Case Summary" id="cs"   value={form.case_summary} onChange={set("case_summary")} rows={3} />
+        <Textarea label="Last Verdict" id="lv"   value={form.last_verdict} onChange={set("last_verdict")}  rows={2} />
+        <Input    label="Tags (comma-separated)" id="tags" value={form.tags} onChange={set("tags")} placeholder="property, deed, delhi" />
+      </Modal>
     </div>
   );
 }

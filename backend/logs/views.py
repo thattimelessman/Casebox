@@ -1,9 +1,8 @@
-# logs/views.py
-from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
-from .models import AccessLog
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
 from rest_framework import serializers
 from accounts.permissions import IsAdmin
+from .models import AccessLog
 
 
 class AccessLogSerializer(serializers.ModelSerializer):
@@ -16,12 +15,21 @@ class AccessLogSerializer(serializers.ModelSerializer):
     def get_user_name(self, obj):
         if obj.user:
             return obj.user.get_full_name() or obj.user.username
-        return "Unknown"
+        return "System"
 
 
-class AccessLogListView(generics.ListAPIView):
-    serializer_class = AccessLogSerializer
-    permission_classes = [IsAdmin]
+@api_view(["GET"])
+@permission_classes([IsAdmin])
+def log_list(request):
+    action_filter = request.query_params.get("action", "")
+    user_filter = request.query_params.get("user", "")
 
-    def get_queryset(self):
-        return AccessLog.objects.select_related("user").all()[:200]
+    qs = AccessLog.objects.all().select_related("user")
+    if action_filter:
+        qs = qs.filter(action=action_filter)
+    if user_filter:
+        qs = qs.filter(user__username__icontains=user_filter)
+
+    # Paginate: last 200 logs
+    qs = qs[:200]
+    return Response(AccessLogSerializer(qs, many=True).data)

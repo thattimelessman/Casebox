@@ -1,318 +1,222 @@
-import { useState, useEffect, useContext } from "react";
-import { AuthContext } from "../../context/AuthContext";
-import api from "../../api/axios";
+import { useState, useEffect, useCallback } from "react";
+import { usersAPI, logsAPI, getErrorMessage } from "../../api";
+import {
+  Card, CardBody, CardHeader, DataTable, Badge, Btn, Modal,
+  Input, Select, FormRow, SearchBar, SectionLabel, EmptyState,
+  StatCard, toast,
+} from "../../components/ui";
+import { SketchUser, SketchBell, SketchDoc } from "../../illustrations/Sketches";
 
-// ─── User Management ────────────────────────────────────────────────
+/* ════════════════════════════════════════
+   USERS PAGE
+════════════════════════════════════════ */
 export function UsersPage() {
-  const { user: currentUser } = useContext(AuthContext);
-  const [users, setUsers] = useState([]);
+  const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [actionLoading, setActionLoading] = useState(null);
+  const [q, setQ]             = useState("");
+  const [roleF, setRoleF]     = useState("");
+  const [modal, setModal]     = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [form, setForm]       = useState({ first_name:"", last_name:"", username:"", email:"", phone:"", password:"", role:"advocate" });
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  const fetchUsers = async () => {
+  const load = useCallback(() => {
+    setLoading(true);
+    usersAPI.list({ search: q, role: roleF })
+      .then(r => setUsers(r.data))
+      .catch(() => toast("Failed to load users.", "error"))
+      .finally(() => setLoading(false));
+  }, [q, roleF]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleApprove = async (user, approve) => {
     try {
-      setLoading(true);
-      const res = await api.get("/api/accounts/users/");
-      setUsers(Array.isArray(res.data) ? res.data : res.data.results || []);
+      await usersAPI.approve(user.id, { is_approved: approve });
+      toast(`${user.first_name} ${approve ? "approved" : "revoked"}.`, "success");
+      load();
     } catch (err) {
-      setError("Failed to load users.");
-    } finally {
-      setLoading(false);
+      toast(getErrorMessage(err), "error");
     }
   };
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  const handleApprove = async (userId) => {
-    setActionLoading(userId + "_approve");
+  const saveUser = async () => {
+    if (!form.username || !form.email || !form.password) { toast("Fill required fields.", "error"); return; }
+    setSaving(true);
     try {
-      await api.patch(`/api/accounts/users/${userId}/approve/`);
-      fetchUsers();
-    } catch {
-      setError("Failed to approve user.");
+      await usersAPI.create(form);
+      toast("User created.", "success");
+      setModal(false);
+      setForm({ first_name:"", last_name:"", username:"", email:"", phone:"", password:"", role:"advocate" });
+      load();
+    } catch (err) {
+      toast(getErrorMessage(err), "error");
     } finally {
-      setActionLoading(null);
+      setSaving(false);
     }
   };
 
-  const handleRoleChange = async (userId, newRole) => {
-    setActionLoading(userId + "_role");
-    try {
-      await api.patch(`/api/accounts/users/${userId}/`, { role: newRole });
-      fetchUsers();
-    } catch {
-      setError("Failed to update role.");
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const roleCounts = ["admin","advocate","judge","client"].reduce((acc, r) => {
+    acc[r] = users.filter(u => u.role === r).length; return acc;
+  }, {});
 
-  const roleColors = {
-    admin: { color: "#7c3aed", bg: "rgba(124,58,237,0.1)" },
-    advocate: { color: "#2563eb", bg: "rgba(37,99,235,0.1)" },
-    judge: { color: "#0891b2", bg: "rgba(8,145,178,0.1)" },
-    client: { color: "#7a7a8a", bg: "rgba(122,122,138,0.1)" },
-  };
-
-  const filteredUsers =
-    filter === "all"
-      ? users
-      : filter === "pending"
-      ? users.filter((u) => !u.is_approved)
-      : users.filter((u) => u.role === filter);
+  const cols = [
+    { label:"Name",   render: u => (
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{
+          width:32, height:32, borderRadius:"50%", background:"rgba(74,124,111,0.12)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontFamily:"'Cormorant Garamond',serif", fontSize:"0.95rem", color:"#4a7c6f", fontWeight:600,
+        }}>{u.first_name?.[0]}</div>
+        <div>
+          <div style={{ fontSize:"0.86rem", fontWeight:500 }}>{u.first_name} {u.last_name}</div>
+          <div style={{ fontSize:"0.74rem", color:"#7a7a8a" }}>@{u.username}</div>
+        </div>
+      </div>
+    )},
+    { label:"Email",   render: u => <span style={{ fontSize:"0.84rem" }}>{u.email}</span> },
+    { label:"Phone",   render: u => <span style={{ fontSize:"0.84rem", color:"#7a7a8a" }}>{u.phone || "—"}</span> },
+    { label:"Role",    render: u => <Badge label={u.role} variant={u.role} /> },
+    { label:"Status",  render: u => u.role === "client"
+        ? <Badge label={u.is_approved ? "approved" : "pending"} variant={u.is_approved ? "approved" : "pending"} />
+        : <span style={{ fontSize:"0.78rem", color:"#7a7a8a" }}>—</span>
+    },
+    { label:"Joined",  render: u => <span style={{ fontSize:"0.8rem", color:"#7a7a8a" }}>{u.created_at?.split("T")[0]}</span> },
+    { label:"",        render: u => u.role === "client" ? (
+      <Btn variant={u.is_approved ? "danger" : "sage"} size="sm"
+        onClick={() => handleApprove(u, !u.is_approved)}>
+        {u.is_approved ? "Revoke" : "Approve"}
+      </Btn>
+    ) : null },
+  ];
 
   return (
-    <div style={{ padding: "32px", fontFamily: "'Cormorant Garamond', serif" }}>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, color: "#1a1a2e", margin: 0 }}>
-          User Management
-        </h1>
-        <p style={{ color: "#7a7a8a", marginTop: 4, fontSize: "0.95rem" }}>
-          {users.length} registered user{users.length !== 1 ? "s" : ""} ·{" "}
-          {users.filter((u) => !u.is_approved).length} pending approval
-        </p>
+    <div>
+      <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:24 }}>
+        <div>
+          <SectionLabel>User Management</SectionLabel>
+          <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744" }}>
+            All <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Users</em>
+          </h1>
+        </div>
+        <Btn variant="sage" onClick={() => setModal(true)}>+ Add User</Btn>
       </div>
 
-      {/* Filter Tabs */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-        {[
-          { key: "all", label: `All (${users.length})` },
-          { key: "pending", label: `Pending (${users.filter((u) => !u.is_approved).length})` },
-          { key: "admin", label: "Admins" },
-          { key: "advocate", label: "Advocates" },
-          { key: "judge", label: "Judges" },
-          { key: "client", label: "Clients" },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setFilter(key)}
-            style={{
-              padding: "7px 16px", borderRadius: 20, border: "1px solid",
-              borderColor: filter === key ? "#4a6cf7" : "#e8e4de",
-              background: filter === key ? "#4a6cf7" : "#fff",
-              color: filter === key ? "#fff" : "#7a7a8a",
-              cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem",
-              fontWeight: filter === key ? 600 : 400,
-            }}
-          >
-            {label}
-          </button>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:20 }}>
+        {["admin","advocate","judge","client"].map(role => (
+          <StatCard key={role} icon={<SketchUser size={22} />}
+            label={role.charAt(0).toUpperCase()+role.slice(1)+"s"}
+            value={roleCounts[role] || 0} />
         ))}
       </div>
 
-      {error && (
-        <div style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444", padding: "12px 16px", borderRadius: 8, marginBottom: 16, fontSize: "0.9rem" }}>
-          {error}
+      <Card noPad>
+        <CardBody style={{ padding:"12px 18px", borderBottom:"1px solid #d6cfc2" }}>
+          <div style={{ display:"flex", gap:10 }}>
+            <SearchBar value={q} onChange={setQ} placeholder="Search name, username, email…" style={{ flex:1 }} />
+            <select value={roleF} onChange={e=>setRoleF(e.target.value)} style={{
+              padding:"8px 12px", border:"1.5px solid #d6cfc2", borderRadius:6,
+              fontFamily:"'DM Sans',sans-serif", fontSize:"0.84rem", background:"#fff",
+            }}>
+              <option value="">All Roles</option>
+              {["admin","advocate","judge","client"].map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+        </CardBody>
+        {loading
+          ? <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading…</div>
+          : <DataTable columns={cols} rows={users} empty="No users match your search." />
+        }
+        <div style={{ padding:"10px 16px", borderTop:"1px solid #ede8df", fontSize:"0.74rem", color:"#7a7a8a" }}>
+          {users.length} users
         </div>
-      )}
+      </Card>
 
-      {loading ? (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#7a7a8a" }}>
-          Loading users...
-        </div>
-      ) : filteredUsers.length === 0 ? (
-        <div style={{
-          textAlign: "center", padding: "60px 0", color: "#7a7a8a",
-          background: "#fff", borderRadius: 12, border: "1px solid #e8e4de",
-        }}>
-          <div style={{ fontSize: "2rem", marginBottom: 12 }}>👥</div>
-          <p style={{ fontSize: "1.1rem" }}>No users found.</p>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {filteredUsers.map((u) => (
-            <div
-              key={u.id}
-              style={{
-                background: "#fff", borderRadius: 12, padding: "18px 24px",
-                border: `1px solid ${!u.is_approved ? "rgba(245,158,11,0.3)" : "#e8e4de"}`,
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                gap: 16,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <div style={{
-                  width: 42, height: 42, borderRadius: "50%",
-                  background: roleColors[u.role]?.bg || "rgba(122,122,138,0.1)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: roleColors[u.role]?.color || "#7a7a8a",
-                  fontWeight: 700, fontSize: "1rem",
-                  flexShrink: 0,
-                }}>
-                  {(u.first_name?.[0] || u.username?.[0] || "?").toUpperCase()}
-                </div>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <p style={{ fontWeight: 600, color: "#1a1a2e", margin: 0, fontSize: "1rem" }}>
-                      {u.first_name || u.last_name
-                        ? `${u.first_name} ${u.last_name}`.trim()
-                        : u.username}
-                    </p>
-                    {u.id === currentUser?.id && (
-                      <span style={{ fontSize: "0.7rem", color: "#7a7a8a", background: "#f0f0f0", padding: "2px 8px", borderRadius: 10 }}>
-                        You
-                      </span>
-                    )}
-                  </div>
-                  <p style={{ color: "#7a7a8a", margin: 0, fontSize: "0.85rem" }}>
-                    @{u.username} · {u.email}
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {/* Role badge */}
-                <span style={{
-                  padding: "4px 12px", borderRadius: 20, fontSize: "0.78rem", fontWeight: 600,
-                  color: roleColors[u.role]?.color, background: roleColors[u.role]?.bg,
-                  textTransform: "capitalize",
-                }}>
-                  {u.role}
-                </span>
-
-                {/* Approval status */}
-                {!u.is_approved ? (
-                  <button
-                    onClick={() => handleApprove(u.id)}
-                    disabled={actionLoading === u.id + "_approve"}
-                    style={{
-                      padding: "6px 14px", background: "#10b981", color: "#fff",
-                      border: "none", borderRadius: 8, cursor: "pointer",
-                      fontFamily: "inherit", fontWeight: 600, fontSize: "0.85rem",
-                    }}
-                  >
-                    {actionLoading === u.id + "_approve" ? "Approving..." : "Approve"}
-                  </button>
-                ) : (
-                  <span style={{ color: "#10b981", fontSize: "0.82rem", fontWeight: 600 }}>✓ Approved</span>
-                )}
-
-                {/* Role change (only for non-self users) */}
-                {u.id !== currentUser?.id && (
-                  <select
-                    value={u.role}
-                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                    disabled={actionLoading === u.id + "_role"}
-                    style={{
-                      padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8,
-                      fontFamily: "inherit", fontSize: "0.85rem", cursor: "pointer",
-                      color: "#4a4a5a", background: "#fff",
-                    }}
-                  >
-                    <option value="client">Client</option>
-                    <option value="advocate">Advocate</option>
-                    <option value="judge">Judge</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <Modal open={modal} onClose={() => setModal(false)} title="Add New User"
+        footer={<>
+          <Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn>
+          <Btn variant="sage"  onClick={saveUser} disabled={saving}>{saving ? "Creating…" : "Create User"}</Btn>
+        </>}>
+        <FormRow>
+          <Input label="First Name *" id="fn" value={form.first_name} onChange={set("first_name")} required />
+          <Input label="Last Name"    id="ln" value={form.last_name}  onChange={set("last_name")} />
+        </FormRow>
+        <Input label="Username *" id="un" value={form.username} onChange={set("username")} required />
+        <Input label="Email *" id="em" type="email" value={form.email} onChange={set("email")} required />
+        <Input label="Phone" id="ph" value={form.phone} onChange={set("phone")} />
+        <FormRow>
+          <Input label="Password *" id="pw" type="password" value={form.password} onChange={set("password")} required />
+          <Select label="Role" id="rl" value={form.role} onChange={set("role")}>
+            {["admin","advocate","judge","client"].map(r=><option key={r} value={r}>{r}</option>)}
+          </Select>
+        </FormRow>
+      </Modal>
     </div>
   );
 }
 
-// ─── Pending Approvals ────────────────────────────────────────────────
+/* ════════════════════════════════════════
+   PENDING APPROVALS
+════════════════════════════════════════ */
 export function PendingApprovalsPage() {
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [actionLoading, setActionLoading] = useState(null);
 
-  const fetchPending = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/api/accounts/users/");
-      const data = Array.isArray(res.data) ? res.data : res.data.results || [];
-setPending(data.filter((u) => !u.is_approved));
-    } catch {
-      setError("Failed to load pending approvals.");
-    } finally {
-      setLoading(false);
-    }
+  const load = () => {
+    setLoading(true);
+    usersAPI.pendingClients()
+      .then(r => setPending(r.data))
+      .catch(() => toast("Failed to load.", "error"))
+      .finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    fetchPending();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  const handleApprove = async (userId) => {
-    setActionLoading(userId);
+  const approve = async (user, val) => {
     try {
-      await api.patch(`/api/accounts/users/${userId}/approve/`);
-      fetchPending();
-    } catch {
-      setError("Failed to approve user.");
-    } finally {
-      setActionLoading(null);
+      await usersAPI.approve(user.id, { is_approved: val });
+      toast(`${user.first_name} ${val ? "approved" : "declined"}.`, "success");
+      load();
+    } catch (err) {
+      toast(getErrorMessage(err), "error");
     }
   };
 
   return (
-    <div style={{ padding: "32px", fontFamily: "'Cormorant Garamond', serif" }}>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, color: "#1a1a2e", margin: 0 }}>
-          Pending Approvals
-        </h1>
-        <p style={{ color: "#7a7a8a", marginTop: 4, fontSize: "0.95rem" }}>
-          {pending.length} user{pending.length !== 1 ? "s" : ""} awaiting approval
-        </p>
-      </div>
-
-      {error && (
-        <div style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444", padding: "12px 16px", borderRadius: 8, marginBottom: 16, fontSize: "0.9rem" }}>
-          {error}
-        </div>
-      )}
+    <div>
+      <SectionLabel>Approvals</SectionLabel>
+      <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744", marginBottom:24 }}>
+        Pending <em style={{ fontStyle:"italic", color:"#b8922a" }}>Approvals</em>
+      </h1>
 
       {loading ? (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#7a7a8a" }}>Loading...</div>
+        <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading…</div>
       ) : pending.length === 0 ? (
-        <div style={{
-          textAlign: "center", padding: "60px 0", color: "#7a7a8a",
-          background: "#fff", borderRadius: 12, border: "1px solid #e8e4de",
-        }}>
-          <div style={{ fontSize: "2.5rem", marginBottom: 12 }}>✅</div>
-          <p style={{ fontSize: "1.2rem", fontWeight: 600, color: "#1a1a2e" }}>All caught up!</p>
-          <p style={{ fontSize: "0.95rem" }}>No users pending approval.</p>
-        </div>
+        <Card><EmptyState icon={<SketchBell size={64} />} title="All clear" desc="No pending client approvals." /></Card>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {pending.map((u) => (
-            <div
-              key={u.id}
-              style={{
-                background: "#fff", borderRadius: 12, padding: "20px 24px",
-                border: "1px solid rgba(245,158,11,0.3)",
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-              }}
-            >
-              <div>
-                <p style={{ fontWeight: 600, color: "#1a1a2e", margin: 0, fontSize: "1rem" }}>
-                  {u.first_name || u.last_name ? `${u.first_name} ${u.last_name}`.trim() : u.username}
-                </p>
-                <p style={{ color: "#7a7a8a", margin: "4px 0 0", fontSize: "0.88rem" }}>
-                  @{u.username} · {u.email} · Role: {u.role}
-                </p>
-              </div>
-              <button
-                onClick={() => handleApprove(u.id)}
-                disabled={actionLoading === u.id}
-                style={{
-                  padding: "9px 20px", background: "#10b981", color: "#fff",
-                  border: "none", borderRadius: 8, cursor: actionLoading === u.id ? "not-allowed" : "pointer",
-                  fontFamily: "inherit", fontWeight: 600, fontSize: "0.9rem",
-                }}
-              >
-                {actionLoading === u.id ? "Approving..." : "Approve Access"}
-              </button>
-            </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {pending.map(u => (
+            <Card key={u.id} noPad>
+              <CardBody style={{ padding:"18px 22px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+                  <div style={{
+                    width:46, height:46, borderRadius:"50%", background:"rgba(184,146,42,0.12)",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    fontFamily:"'Cormorant Garamond',serif", fontSize:"1.2rem", color:"#b8922a", fontWeight:600,
+                  }}>{u.first_name?.[0]}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:500, color:"#1a1a2e", fontSize:"0.95rem" }}>{u.first_name} {u.last_name}</div>
+                    <div style={{ fontSize:"0.78rem", color:"#7a7a8a" }}>{u.email} · @{u.username}</div>
+                    {u.phone && <div style={{ fontSize:"0.78rem", color:"#7a7a8a" }}>{u.phone}</div>}
+                    <div style={{ fontSize:"0.74rem", color:"#b0a898", marginTop:3 }}>Registered {u.created_at?.split("T")[0]}</div>
+                  </div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <Btn variant="sage"  size="sm" onClick={() => approve(u, true)}>Approve Access</Btn>
+                    <Btn variant="ghost" size="sm" onClick={() => approve(u, false)}>Decline</Btn>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
           ))}
         </div>
       )}
@@ -320,97 +224,83 @@ setPending(data.filter((u) => !u.is_approved));
   );
 }
 
-// ─── Audit Log ────────────────────────────────────────────────────────
+/* ════════════════════════════════════════
+   AUDIT LOG
+════════════════════════════════════════ */
+const ACTION_COLORS = {
+  login:           "#e3f0fb", view_case:"#e8f5e9", view_document:"#e8f5e9",
+  upload_document: "#fdf8ef", edit_case:"#fdf8ef", approve_client:"#f0f7f5",
+  revoke_client:   "#fce8e8",
+};
+
 export function AuditLogPage() {
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs]       = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [q, setQ]             = useState("");
+  const [act, setAct]         = useState("");
 
   useEffect(() => {
-    const fetchLogs = async () => {
-      try {
-        const res = await api.get("/api/logs/");
-        setLogs(Array.isArray(res.data) ? res.data : res.data.results || []);
-      } catch {
-        setError("Failed to load audit logs.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchLogs();
-  }, []);
+    logsAPI.list({ action: act, user: q })
+      .then(r => setLogs(r.data))
+      .catch(() => toast("Failed to load logs.", "error"))
+      .finally(() => setLoading(false));
+  }, [q, act]);
 
-  const actionColor = (action) => {
-    if (action?.toLowerCase().includes("login")) return { color: "#2563eb", bg: "rgba(37,99,235,0.08)" };
-    if (action?.toLowerCase().includes("create")) return { color: "#10b981", bg: "rgba(16,185,129,0.08)" };
-    if (action?.toLowerCase().includes("delete")) return { color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
-    if (action?.toLowerCase().includes("approve")) return { color: "#7c3aed", bg: "rgba(124,58,237,0.08)" };
-    return { color: "#7a7a8a", bg: "rgba(122,122,138,0.08)" };
-  };
+  const actions = [...new Set(logs.map(l => l.action))];
 
   return (
-    <div style={{ padding: "32px", fontFamily: "'Cormorant Garamond', serif" }}>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, color: "#1a1a2e", margin: 0 }}>
-          Audit Log
-        </h1>
-        <p style={{ color: "#7a7a8a", marginTop: 4, fontSize: "0.95rem" }}>
-          {logs.length} recorded action{logs.length !== 1 ? "s" : ""}
-        </p>
-      </div>
+    <div>
+      <SectionLabel>System Audit</SectionLabel>
+      <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744", marginBottom:24 }}>
+        Audit <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Log</em>
+      </h1>
 
-      {error && (
-        <div style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444", padding: "12px 16px", borderRadius: 8, marginBottom: 16, fontSize: "0.9rem" }}>
-          {error}
-        </div>
-      )}
+      <Card noPad style={{ marginBottom:14 }}>
+        <CardBody style={{ padding:"12px 18px" }}>
+          <div style={{ display:"flex", gap:10 }}>
+            <SearchBar value={q} onChange={setQ} placeholder="Filter by username…" style={{ flex:1 }} />
+            <select value={act} onChange={e=>setAct(e.target.value)} style={{
+              padding:"8px 12px", border:"1.5px solid #d6cfc2", borderRadius:6,
+              fontFamily:"'DM Sans',sans-serif", fontSize:"0.84rem", background:"#fff",
+            }}>
+              <option value="">All Actions</option>
+              {actions.map(a=><option key={a} value={a}>{a.replace(/_/g," ")}</option>)}
+            </select>
+          </div>
+        </CardBody>
+      </Card>
 
-      {loading ? (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#7a7a8a" }}>Loading logs...</div>
-      ) : logs.length === 0 ? (
-        <div style={{
-          textAlign: "center", padding: "60px 0", color: "#7a7a8a",
-          background: "#fff", borderRadius: 12, border: "1px solid #e8e4de",
-        }}>
-          <div style={{ fontSize: "2rem", marginBottom: 12 }}>📋</div>
-          <p style={{ fontSize: "1.1rem" }}>No activity logged yet.</p>
-        </div>
-      ) : (
-        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8e4de", overflow: "hidden" }}>
-          {logs.map((log, idx) => {
-            const ac = actionColor(log.action);
-            return (
-              <div
-                key={log.id || idx}
-                style={{
-                  padding: "14px 24px",
-                  borderBottom: idx < logs.length - 1 ? "1px solid #f0ece6" : "none",
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <span style={{
-                    padding: "4px 10px", borderRadius: 6, fontSize: "0.78rem", fontWeight: 600,
-                    color: ac.color, background: ac.bg, textTransform: "uppercase", letterSpacing: "0.04em",
-                    flexShrink: 0,
-                  }}>
-                    {log.action || "Action"}
-                  </span>
-                  <p style={{ color: "#4a4a5a", margin: 0, fontSize: "0.92rem" }}>
-                    <span style={{ fontWeight: 600, color: "#1a1a2e" }}>
-                      {log.user_name || log.user || "System"}
-                    </span>
-                    {log.detail && ` — ${log.detail}`}
-                  </p>
+      <Card noPad>
+        {loading
+          ? <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading…</div>
+          : logs.length === 0
+            ? <EmptyState icon={<SketchDoc size={64} />} title="No log entries" desc="No events match your filter." />
+            : logs.map((log, i) => (
+              <div key={log.id} style={{
+                display:"flex", alignItems:"center", gap:14, padding:"12px 18px",
+                borderBottom: i < logs.length-1 ? "1px solid #ede8df":"none",
+                background: ACTION_COLORS[log.action] || "#fff",
+              }}>
+                <div style={{
+                  width:34, height:34, borderRadius:"50%", background:"rgba(74,124,111,0.12)",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontFamily:"'Cormorant Garamond',serif", fontSize:"0.95rem", color:"#4a7c6f", fontWeight:600, flexShrink:0,
+                }}>{log.user_name?.[0] || "?"}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:"0.84rem", fontWeight:500, color:"#1a1a2e" }}>{log.user_name}</div>
+                  <div style={{ fontSize:"0.78rem", color:"#7a7a8a" }}>{log.description}</div>
                 </div>
-                <p style={{ color: "#7a7a8a", margin: 0, fontSize: "0.82rem", flexShrink: 0 }}>
-                  {new Date(log.timestamp).toLocaleString()}
-                </p>
+                <Badge label={log.action.replace(/_/g," ")} variant="approved" />
+                <div style={{ fontSize:"0.74rem", color:"#b0a898", whiteSpace:"nowrap", flexShrink:0 }}>
+                  {new Date(log.timestamp).toLocaleString("en-IN", { dateStyle:"short", timeStyle:"short" })}
+                </div>
               </div>
-            );
-          })}
+            ))
+        }
+        <div style={{ padding:"10px 18px", borderTop:"1px solid #ede8df", fontSize:"0.74rem", color:"#7a7a8a" }}>
+          {logs.length} entries (last 200)
         </div>
-      )}
+      </Card>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import AccessLogListView
+from .views import log_list
 
 urlpatterns = [
-    path("", AccessLogListView.as_view(), name="access-logs"),
+    path("", log_list, name="log-list"),
 ]

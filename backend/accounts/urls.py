@@ -1,10 +1,13 @@
-from django.urls import path
-from .views import RegisterView, MeView, UserListView, UserDetailView, approve_user
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from . import views
+
+router = DefaultRouter()
+router.register("users", views.UserViewSet, basename="user")
 
 urlpatterns = [
-    path("register/", RegisterView.as_view(), name="register"),
-    path("me/", MeView.as_view(), name="me"),
-    path("users/", UserListView.as_view(), name="user-list"),
-    path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
-    path("users/<int:pk>/approve/", approve_user, name="approve-user"),
+    path("", include(router.urls)),
+    path("me/", views.me, name="me"),
+    path("me/change-password/", views.change_password, name="change-password"),
+    path("register/", views.RegisterView.as_view(), name="register"),
 ]

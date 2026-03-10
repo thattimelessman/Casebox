@@ -1,276 +1,314 @@
-import { useState, useEffect, useContext } from "react";
-import { AuthContext } from "../context/AuthContext";
-import api from "../api/axios";
+import { useState, useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
+import { casesAPI, docsAPI } from "../api";
+import {
+  Card, CardBody, CardHeader, Badge, Btn, DataTable,
+  SearchBar, SectionLabel, ProgressBar, EmptyState, StatCard, toast,
+} from "../components/ui";
+import { SketchNotepad, SketchScales, SketchFolder, SketchFlower, SketchGavel } from "../illustrations/Sketches";
 
-const statusColor = { pending: "#f59e0b", approved: "#10b981", rejected: "#ef4444" };
-const statusBg    = { pending: "rgba(245,158,11,0.1)", approved: "rgba(16,185,129,0.1)", rejected: "rgba(239,68,68,0.1)" };
+/* ── Shared hook ─────────────────────────────────────────────── */
+function useCases(params = {}) {
+  const [cases, setCases]     = useState([]);
+  const [loading, setLoading] = useState(true);
 
-function CasesList({ cases, loading, onSelect }) {
-  if (loading) return <div style={{ textAlign:"center", padding:"40px 0", color:"#7a7a8a" }}>Loading cases…</div>;
-  if (!cases.length) return (
-    <div style={{ textAlign:"center", padding:"60px 0", color:"#7a7a8a", background:"#fff", borderRadius:12, border:"1px solid #e8e4de" }}>
-      <div style={{ fontSize:"2rem", marginBottom:12 }}>📁</div>
-      <p style={{ fontSize:"1.1rem" }}>No cases found.</p>
+  useEffect(() => {
+    casesAPI.list(params)
+      .then(r => setCases(r.data))
+      .catch(() => toast("Failed to load cases.", "error"))
+      .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { cases, loading };
+}
+
+/* ── Shared table ────────────────────────────────────────────── */
+function CasesTable({ cases, loading, onOpen }) {
+  const [q, setQ] = useState("");
+  const filtered  = cases.filter(c => {
+    const qs = q.toLowerCase();
+    return !q || c.case_no?.toLowerCase().includes(qs) || c.case_title?.toLowerCase().includes(qs);
+  });
+
+  const cols = [
+    { label:"Case No",  render: c => <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:"0.78rem", color:"#243460" }}>{c.case_no}</span> },
+    { label:"Title",    render: c => (
+      <div>
+        <div style={{ fontSize:"0.86rem", fontWeight:500, color:"#1a1a2e" }}>{c.case_title}</div>
+        <div style={{ fontSize:"0.73rem", color:"#7a7a8a" }}>{c.court_name}</div>
+      </div>
+    )},
+    { label:"Type",     render: c => <Badge label={c.case_type} variant={c.case_type} /> },
+    { label:"Priority", render: c => <Badge label={c.priority}  variant={c.priority}  /> },
+    { label:"Next Hearing", render: c => (
+      <span style={{ fontSize:"0.82rem", color:c.next_hearing_date?"#243460":"#7a7a8a" }}>
+        {c.next_hearing_date || "—"}
+      </span>
+    )},
+    { label:"Progress", render: c => <div style={{ width:90 }}><ProgressBar value={c.progress} /></div> },
+    { label:"Status",   render: c => <Badge label={c.status} variant={c.status} /> },
+  ];
+
+  return (
+    <>
+      <Card noPad style={{ marginBottom:14 }}>
+        <CardBody style={{ padding:"12px 18px" }}>
+          <SearchBar value={q} onChange={setQ} placeholder="Search cases…" />
+        </CardBody>
+      </Card>
+      <Card noPad>
+        {loading
+          ? <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading…</div>
+          : filtered.length === 0
+            ? <EmptyState icon={<SketchNotepad size={64} />} title="No cases" desc="No cases match your search." />
+            : <DataTable columns={cols} rows={filtered} onRowClick={c => onOpen(c.id)} />
+        }
+      </Card>
+    </>
+  );
+}
+
+/* ════════════════════════════════════════
+   ADVOCATE CASES
+════════════════════════════════════════ */
+export function AdvocateCasesPage({ setPage, setDetailCase }) {
+  const { user } = useAuth();
+  const { cases, loading } = useCases();
+
+  const myClient = cases.filter(c => c.client_advocate === user.id);
+  const myOpp    = cases.filter(c => c.opposition_advocate === user.id);
+  const [tab, setTab] = useState("client");
+
+  const shown = tab === "client" ? myClient : myOpp;
+
+  return (
+    <div>
+      <SectionLabel>My Practice</SectionLabel>
+      <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:20 }}>
+        <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744" }}>
+          My <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Cases</em>
+        </h1>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:22 }}>
+        <StatCard icon={<SketchNotepad size={24} />} label="As Client Advocate" value={myClient.length} />
+        <StatCard icon={<SketchScales size={24} />}  label="As Opposition"      value={myOpp.length} accent="#9b4444" />
+        <StatCard icon={<SketchFlower size={24} />}  label="Active" value={cases.filter(c=>c.status==="ongoing").length} />
+      </div>
+
+      <div style={{ display:"flex", gap:0, marginBottom:16, border:"1px solid #d6cfc2", borderRadius:8, overflow:"hidden", width:"fit-content" }}>
+        {[
+          { key:"client", label:`Client Advocate (${myClient.length})` },
+          { key:"opp",    label:`Opposition (${myOpp.length})` },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            padding:"9px 20px", border:"none", cursor:"pointer",
+            background: tab===t.key ? "#1a2744" : "#fff",
+            color:      tab===t.key ? "#f8f4ed" : "#7a7a8a",
+            fontFamily:"'DM Sans',sans-serif", fontSize:"0.82rem",
+            fontWeight: tab===t.key ? 500 : 400, transition:"all 0.2s",
+          }}>{t.label}</button>
+        ))}
+      </div>
+
+      <CasesTable cases={shown} loading={loading}
+        onOpen={id => { setDetailCase(id); setPage("case-detail"); }} />
     </div>
   );
+}
+
+/* ════════════════════════════════════════
+   ADVOCATE DOCUMENTS
+════════════════════════════════════════ */
+export function AdvocateDocumentsPage({ setPage, setDetailCase }) {
+  const { cases, loading } = useCases();
+  const myCases = cases.filter(c => c.document_count > 0);
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-      {cases.map(c => (
-        <div key={c.id} onClick={() => onSelect && onSelect(c.id)}
-          style={{ background:"#fff", borderRadius:12, padding:"18px 24px", border:"1px solid #e8e4de",
-            display:"flex", justifyContent:"space-between", alignItems:"center",
-            cursor: onSelect ? "pointer" : "default" }}
-          onMouseEnter={e => onSelect && (e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.08)")}
-          onMouseLeave={e => (e.currentTarget.style.boxShadow = "none")}
-        >
-          <div>
-            <h3 style={{ fontSize:"1.05rem", fontWeight:600, color:"#1a1a2e", margin:0 }}>{c.title}</h3>
-            <p style={{ color:"#7a7a8a", fontSize:"0.85rem", marginTop:4, marginBottom:0 }}>
-              Case #{c.id} · {new Date(c.created_at).toLocaleDateString()}
-            </p>
-          </div>
-          <span style={{ padding:"5px 12px", borderRadius:20, fontSize:"0.78rem", fontWeight:600,
-            color:statusColor[c.status], background:statusBg[c.status],
-            textTransform:"uppercase", letterSpacing:"0.06em" }}>
-            {c.status}
-          </span>
-        </div>
+    <div>
+      <SectionLabel>Documents</SectionLabel>
+      <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744", marginBottom:24 }}>
+        Case <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Documents</em>
+      </h1>
+
+      {loading ? (
+        <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading…</div>
+      ) : myCases.length === 0 ? (
+        <Card><EmptyState icon={<SketchFolder size={64} />} title="No documents" desc="Documents from your cases appear here." /></Card>
+      ) : myCases.map(c => (
+        <Card key={c.id} noPad style={{ marginBottom:14 }}>
+          <CardHeader title={c.case_title} action={
+            <Btn variant="ghost" size="sm" onClick={() => { setDetailCase(c.id); setPage("case-detail"); }}>
+              View Case & Upload →
+            </Btn>
+          } />
+          <CardBody>
+            <div style={{ fontSize:"0.82rem", color:"#7a7a8a" }}>
+              {c.document_count} document{c.document_count !== 1 ? "s" : ""} · {c.case_no}
+            </div>
+          </CardBody>
+        </Card>
       ))}
     </div>
   );
 }
 
-export function AdvocateCasesPage({ setPage, setDetailCase }) {
-  const { user } = useContext(AuthContext);
-  const [cases, setCases]       = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm]         = useState({ title:"", description:"" });
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError]       = useState("");
-
-  const fetchCases = async () => {
-    try { const r = await api.get("/api/cases/"); setCases(r.data); }
-    catch { setError("Failed to load cases."); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { fetchCases(); }, []);
-
-  const handleCreate = async () => {
-    if (!form.title.trim()) return;
-    setSubmitting(true);
-    try { await api.post("/api/cases/", form); setForm({ title:"", description:"" }); setShowForm(false); fetchCases(); }
-    catch { setError("Failed to create case."); }
-    finally { setSubmitting(false); }
-  };
-
-  const handleSelect = (id) => { setDetailCase(id); setPage("case-detail"); };
-
-  return (
-    <div style={{ padding:"32px", fontFamily:"'Cormorant Garamond', serif" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:28 }}>
-        <div>
-          <h1 style={{ fontSize:"1.8rem", fontWeight:700, color:"#1a1a2e", margin:0 }}>My Cases</h1>
-          <p style={{ color:"#7a7a8a", marginTop:4, fontSize:"0.95rem" }}>Welcome, {user?.first_name || user?.username}</p>
-        </div>
-        <button onClick={() => setShowForm(!showForm)} style={{ padding:"10px 22px", background:"#4a6cf7", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>
-          + File New Case
-        </button>
-      </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16, marginBottom:28 }}>
-        {[
-          { label:"Total Filed", value:cases.length, color:"#4a6cf7" },
-          { label:"Pending",     value:cases.filter(c=>c.status==="pending").length, color:"#f59e0b" },
-          { label:"Approved",    value:cases.filter(c=>c.status==="approved").length, color:"#10b981" },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ background:"#fff", borderRadius:12, padding:"20px 24px", border:"1px solid #e8e4de", textAlign:"center" }}>
-            <p style={{ fontSize:"2rem", fontWeight:700, color, margin:0 }}>{value}</p>
-            <p style={{ color:"#7a7a8a", margin:"4px 0 0", fontSize:"0.88rem" }}>{label}</p>
-          </div>
-        ))}
-      </div>
-
-      {showForm && (
-        <div style={{ background:"#fff", borderRadius:12, padding:24, marginBottom:24, border:"1px solid #e8e4de" }}>
-          <h3 style={{ fontSize:"1.1rem", fontWeight:600, color:"#1a1a2e", marginBottom:16 }}>File New Case</h3>
-          <input value={form.title} onChange={e => setForm({...form, title:e.target.value})} placeholder="Case title *"
-            style={{ width:"100%", padding:"10px 14px", border:"1px solid #ddd", borderRadius:8, fontSize:"1rem", fontFamily:"inherit", boxSizing:"border-box", marginBottom:12, outline:"none" }} />
-          <textarea value={form.description} onChange={e => setForm({...form, description:e.target.value})} placeholder="Description…" rows={3}
-            style={{ width:"100%", padding:"10px 14px", border:"1px solid #ddd", borderRadius:8, fontSize:"1rem", fontFamily:"inherit", boxSizing:"border-box", resize:"vertical", marginBottom:14, outline:"none" }} />
-          <div style={{ display:"flex", gap:10 }}>
-            <button onClick={handleCreate} disabled={submitting || !form.title.trim()}
-              style={{ padding:"10px 22px", background:submitting?"#ccc":"#4a6cf7", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>
-              {submitting ? "Filing…" : "File Case"}
-            </button>
-            <button onClick={() => setShowForm(false)}
-              style={{ padding:"10px 22px", background:"none", border:"1px solid #ddd", borderRadius:8, cursor:"pointer", fontFamily:"inherit", color:"#7a7a8a" }}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {error && <div style={{ color:"#ef4444", marginBottom:16 }}>{error}</div>}
-      <CasesList cases={cases} loading={loading} onSelect={handleSelect} />
-    </div>
-  );
-}
-
-export function AdvocateDocumentsPage() {
-  return (
-    <div style={{ padding:"32px", fontFamily:"'Cormorant Garamond', serif" }}>
-      <h1 style={{ fontSize:"1.8rem", fontWeight:700, color:"#1a1a2e" }}>Documents</h1>
-      <p style={{ color:"#7a7a8a" }}>Document management coming soon.</p>
-    </div>
-  );
-}
-
+/* ════════════════════════════════════════
+   JUDGE CASES
+════════════════════════════════════════ */
 export function JudgeCasesPage({ setPage, setDetailCase }) {
-  const { user } = useContext(AuthContext);
-  const [cases, setCases]     = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter]   = useState("pending");
-  const [actionLoading, setActionLoading] = useState(null);
-  const [error, setError]     = useState("");
-
-  const fetchCases = async () => {
-    try { const r = await api.get("/api/cases/"); setCases(r.data); }
-    catch { setError("Failed to load cases."); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { fetchCases(); }, []);
-
-  const handleDecision = async (caseId, decision) => {
-    setActionLoading(caseId + "_" + decision);
-    try { await api.patch(`/api/cases/${caseId}/`, { status: decision }); fetchCases(); }
-    catch { setError("Failed to update case."); }
-    finally { setActionLoading(null); }
-  };
-
-  const handleSelect = (id) => { setDetailCase(id); setPage("case-detail"); };
-  const filtered = filter === "all" ? cases : cases.filter(c => c.status === filter);
+  const { cases, loading } = useCases();
 
   return (
-    <div style={{ padding:"32px", fontFamily:"'Cormorant Garamond', serif" }}>
-      <div style={{ marginBottom:28 }}>
-        <h1 style={{ fontSize:"1.8rem", fontWeight:700, color:"#1a1a2e", margin:0 }}>Judge's Chamber</h1>
-        <p style={{ color:"#7a7a8a", marginTop:4 }}>Welcome, {user?.first_name || "Judge"} · {cases.filter(c=>c.status==="pending").length} pending review</p>
+    <div>
+      <SectionLabel>Assigned Matters</SectionLabel>
+      <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:20 }}>
+        <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744" }}>
+          Assigned <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Cases</em>
+        </h1>
       </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16, marginBottom:28 }}>
-        {[
-          { label:"Pending", value:cases.filter(c=>c.status==="pending").length, color:"#f59e0b" },
-          { label:"Approved", value:cases.filter(c=>c.status==="approved").length, color:"#10b981" },
-          { label:"Rejected", value:cases.filter(c=>c.status==="rejected").length, color:"#ef4444" },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ background:"#fff", borderRadius:12, padding:"20px 24px", border:"1px solid #e8e4de", textAlign:"center" }}>
-            <p style={{ fontSize:"2rem", fontWeight:700, color, margin:0 }}>{value}</p>
-            <p style={{ color:"#7a7a8a", margin:"4px 0 0", fontSize:"0.88rem" }}>{label}</p>
-          </div>
-        ))}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:22 }}>
+        <StatCard icon={<SketchScales size={24} />}  label="Total Assigned" value={cases.length} />
+        <StatCard icon={<SketchGavel size={24} />}   label="Ongoing"        value={cases.filter(c=>c.status==="ongoing").length} />
+        <StatCard icon={<SketchNotepad size={24} />} label="Reserved"       value={cases.filter(c=>c.status==="judgement_reserved").length} accent="#9b4444" />
       </div>
-
-      <div style={{ display:"flex", gap:8, marginBottom:20 }}>
-        {["pending","all","approved","rejected"].map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{
-            padding:"7px 16px", borderRadius:20, border:"1px solid",
-            borderColor: filter===f ? "#4a6cf7" : "#e8e4de",
-            background: filter===f ? "#4a6cf7" : "#fff",
-            color: filter===f ? "#fff" : "#7a7a8a",
-            cursor:"pointer", fontFamily:"inherit", fontSize:"0.85rem", textTransform:"capitalize",
-          }}>
-            {f.charAt(0).toUpperCase()+f.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {error && <div style={{ color:"#ef4444", marginBottom:16 }}>{error}</div>}
-
-      {loading ? <div style={{ textAlign:"center", padding:"40px 0", color:"#7a7a8a" }}>Loading…</div>
-      : filtered.length === 0 ? (
-        <div style={{ textAlign:"center", padding:"60px 0", color:"#7a7a8a", background:"#fff", borderRadius:12, border:"1px solid #e8e4de" }}>
-          <div style={{ fontSize:"2rem", marginBottom:12 }}>⚖️</div>
-          <p>No {filter !== "all" ? filter : ""} cases.</p>
-        </div>
-      ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          {filtered.map(c => (
-            <div key={c.id} style={{ background:"#fff", borderRadius:12, padding:"20px 24px",
-              border:`1px solid ${c.status==="pending" ? "rgba(245,158,11,0.3)" : "#e8e4de"}` }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
-                <div style={{ cursor:"pointer" }} onClick={() => handleSelect(c.id)}>
-                  <h3 style={{ fontSize:"1.1rem", fontWeight:600, color:"#1a1a2e", margin:0 }}>{c.title}</h3>
-                  <p style={{ color:"#7a7a8a", fontSize:"0.85rem", margin:"4px 0 0" }}>
-                    Case #{c.id} · {new Date(c.created_at).toLocaleDateString()}{c.created_by_name && ` · By ${c.created_by_name}`}
-                  </p>
-                </div>
-                <span style={{ padding:"5px 12px", borderRadius:20, fontSize:"0.78rem", fontWeight:600,
-                  color:statusColor[c.status], background:statusBg[c.status],
-                  textTransform:"uppercase", letterSpacing:"0.06em", flexShrink:0 }}>
-                  {c.status}
-                </span>
-              </div>
-              {c.status === "pending" && (
-                <div style={{ display:"flex", gap:10 }}>
-                  <button onClick={() => handleDecision(c.id,"approved")} disabled={actionLoading===c.id+"_approved"}
-                    style={{ padding:"8px 18px", background:"#10b981", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>
-                    {actionLoading===c.id+"_approved" ? "…" : "✓ Approve"}
-                  </button>
-                  <button onClick={() => handleDecision(c.id,"rejected")} disabled={actionLoading===c.id+"_rejected"}
-                    style={{ padding:"8px 18px", background:"#ef4444", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>
-                    {actionLoading===c.id+"_rejected" ? "…" : "✗ Reject"}
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <CasesTable cases={cases} loading={loading}
+        onOpen={id => { setDetailCase(id); setPage("case-detail"); }} />
     </div>
   );
 }
 
+/* ════════════════════════════════════════
+   CLIENT CASES
+════════════════════════════════════════ */
 export function ClientCasesPage({ setPage, setDetailCase }) {
-  const { user } = useContext(AuthContext);
-  const [cases, setCases]     = useState([]);
+  const { cases, loading } = useCases();
+
+  if (loading) return <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading your case…</div>;
+
+  return (
+    <div>
+      <SectionLabel>My Matter</SectionLabel>
+      <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744", marginBottom:24 }}>
+        My <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Case</em>
+      </h1>
+
+      {cases.length === 0 ? (
+        <Card>
+          <EmptyState icon={<SketchNotepad size={64} />} title="No case linked yet"
+            desc="Your advocate will link your case once your account is set up. Check back soon." />
+        </Card>
+      ) : cases.map(c => (
+        <Card key={c.id} noPad style={{ marginBottom:16, cursor:"pointer", transition:"box-shadow 0.2s" }}
+          onMouseEnter={e => e.currentTarget.style.boxShadow="0 6px 24px rgba(26,39,68,0.12)"}
+          onMouseLeave={e => e.currentTarget.style.boxShadow="0 1px 4px rgba(26,39,68,0.06)"}
+          onClick={() => { setDetailCase(c.id); setPage("case-detail"); }}>
+
+          <div style={{ height:3, background:
+            c.priority==="urgent"?"#9b4444":c.priority==="high"?"#b8922a":c.priority==="medium"?"#4a6fa5":"#4a7c6f",
+            borderRadius:"12px 12px 0 0" }} />
+
+          <CardBody style={{ padding:"22px 26px" }}>
+            <div style={{ display:"flex", alignItems:"flex-start", gap:16 }}>
+              <div style={{ flex:1 }}>
+                <div style={{ display:"flex", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                  <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:"0.74rem", color:"#7a7a8a" }}>{c.case_no}</span>
+                  <Badge label={c.status}    variant={c.status} />
+                  <Badge label={c.case_type} variant={c.case_type} />
+                </div>
+                <h2 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"1.4rem", fontWeight:600, color:"#1a2744", marginBottom:6 }}>
+                  {c.case_title}
+                </h2>
+                <div style={{ fontSize:"0.82rem", color:"#7a7a8a", marginBottom:16 }}>{c.court_name}{c.court_city ? ` · ${c.court_city}` : ""}</div>
+
+                <ProgressBar value={c.progress} />
+
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginTop:16 }}>
+                  {[
+                    { label:"Filed On",     val:c.filing_date       || "—" },
+                    { label:"Last Hearing", val:c.last_hearing_date || "—" },
+                    { label:"Next Hearing", val:c.next_hearing_date || "—" },
+                  ].map((d,i) => (
+                    <div key={i} style={{ padding:"10px 14px", background:"#f8f4ed", borderRadius:7 }}>
+                      <div style={{ fontSize:"0.66rem", color:"#7a7a8a", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>{d.label}</div>
+                      <div style={{ fontSize:"0.88rem", color:"#1a1a2e", fontWeight:500 }}>{d.val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {c.last_hearing_date && (
+                  <div style={{ marginTop:14, padding:"12px 16px", background:"#f0f7f5", borderRadius:7, border:"1px solid rgba(74,124,111,0.2)" }}>
+                    <div style={{ fontSize:"0.66rem", color:"#4a7c6f", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:4 }}>Advocate</div>
+                    <p style={{ fontSize:"0.86rem", color:"#1a1a2e", fontWeight:500 }}>{c.advocate_name || "To be assigned"}</p>
+                  </div>
+                )}
+              </div>
+              <div style={{ flexShrink:0, opacity:0.2 }}>
+                <SketchScales size={52} />
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   CLIENT DOCUMENTS
+════════════════════════════════════════ */
+export function ClientDocumentsPage({ setPage, setDetailCase }) {
+  const [docs, setDocs]       = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState("");
 
   useEffect(() => {
-    api.get("/api/cases/")
-      .then(r => setCases(r.data))
-      .catch(() => setError("Failed to load cases."))
+    docsAPI.list()
+      .then(r => setDocs(r.data))
+      .catch(() => toast("Failed to load documents.", "error"))
       .finally(() => setLoading(false));
   }, []);
 
-  const handleSelect = (id) => { setDetailCase(id); setPage("case-detail"); };
-
   return (
-    <div style={{ padding:"32px", fontFamily:"'Cormorant Garamond', serif" }}>
-      <div style={{ marginBottom:28 }}>
-        <h1 style={{ fontSize:"1.8rem", fontWeight:700, color:"#1a1a2e", margin:0 }}>My Portal</h1>
-        <p style={{ color:"#7a7a8a", marginTop:4 }}>Welcome, {user?.first_name || user?.username}</p>
-      </div>
+    <div>
+      <SectionLabel>My Documents</SectionLabel>
+      <h1 style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"2rem", fontWeight:300, color:"#1a2744", marginBottom:24 }}>
+        My <em style={{ fontStyle:"italic", color:"#4a7c6f" }}>Documents</em>
+      </h1>
 
-      {!user?.is_approved && (
-        <div style={{ background:"rgba(245,158,11,0.08)", border:"1px solid rgba(245,158,11,0.3)", borderRadius:12, padding:"16px 20px", marginBottom:24 }}>
-          <p style={{ fontWeight:600, color:"#92400e", margin:0 }}>⏳ Account Pending Approval</p>
-          <p style={{ color:"#92400e", margin:"4px 0 0", fontSize:"0.9rem" }}>Your account is awaiting admin approval.</p>
-        </div>
+      {loading ? (
+        <div style={{ padding:40, textAlign:"center", color:"#7a7a8a" }}>Loading…</div>
+      ) : docs.length === 0 ? (
+        <Card><EmptyState icon={<SketchFolder size={64} />} title="No documents yet"
+          desc="When your advocate shares documents with you, they'll appear here." /></Card>
+      ) : (
+        <Card noPad>
+          {docs.map((d, i) => (
+            <div key={d.id} style={{
+              display:"flex", alignItems:"center", gap:12, padding:"14px 18px",
+              borderBottom: i < docs.length-1 ? "1px solid #ede8df":"none",
+            }}>
+              <div style={{
+                width:38, height:38, borderRadius:8, background:"#1a2744",
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:"0.9rem", flexShrink:0,
+              }}>📄</div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:"0.88rem", fontWeight:500, color:"#1a1a2e" }}>{d.title}</div>
+                <div style={{ fontSize:"0.74rem", color:"#7a7a8a" }}>
+                  {d.side} · {d.upload_date?.split("T")[0] || "—"}
+                  {d.description && ` · ${d.description}`}
+                </div>
+              </div>
+              <Badge label={d.side} variant={d.side} />
+              {d.file_url && (
+                <a href={d.file_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration:"none" }}>
+                  <Btn variant="ghost" size="sm">↓ Download</Btn>
+                </a>
+              )}
+            </div>
+          ))}
+        </Card>
       )}
-
-      {error && <div style={{ color:"#ef4444", marginBottom:16 }}>{error}</div>}
-      <CasesList cases={cases} loading={loading} onSelect={handleSelect} />
-    </div>
-  );
-}
-
-export function ClientDocumentsPage() {
-  return (
-    <div style={{ padding:"32px", fontFamily:"'Cormorant Garamond', serif" }}>
-      <h1 style={{ fontSize:"1.8rem", fontWeight:700, color:"#1a1a2e" }}>My Documents</h1>
-      <p style={{ color:"#7a7a8a" }}>Document management coming soon.</p>
     </div>
   );
 }

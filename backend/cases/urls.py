@@ -1,8 +1,8 @@
-from django.urls import path
-from .views import CaseListCreateView, CaseDetailView, HearingNoteListCreateView
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import CaseViewSet
 
-urlpatterns = [
-    path("", CaseListCreateView.as_view(), name="case-list"),
-    path("<int:pk>/", CaseDetailView.as_view(), name="case-detail"),
-    path("<int:case_pk>/notes/", HearingNoteListCreateView.as_view(), name="hearing-notes"),
-]
+router = DefaultRouter()
+router.register("", CaseViewSet, basename="case")
+
+urlpatterns = [path("", include(router.urls))]

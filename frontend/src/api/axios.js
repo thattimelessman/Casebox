@@ -1,42 +1,42 @@
 import axios from "axios";
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
+const API = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || "http://localhost:8000/api",
 });
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("access");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+// Auto-attach JWT on every request
+API.interceptors.request.use((config) => {
+  const token = localStorage.getItem("casebox_access");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-api.interceptors.response.use(
+// Auto-refresh on 401
+API.interceptors.response.use(
   (res) => res,
-  async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+  async (err) => {
+    const original = err.config;
+    if (err.response?.status === 401 && !original._retry) {
       original._retry = true;
-      const refresh = localStorage.getItem("refresh");
+      const refresh = localStorage.getItem("casebox_refresh");
       if (refresh) {
         try {
-          const res = await axios.post(
-            `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/api/token/refresh/`,
+          const { data } = await axios.post(
+            `${process.env.REACT_APP_API_URL || "http://localhost:8000/api"}/token/refresh/`,
             { refresh }
           );
-          localStorage.setItem("access", res.data.access);
-          original.headers.Authorization = `Bearer ${res.data.access}`;
-          return api(original);
+          localStorage.setItem("casebox_access", data.access);
+          original.headers.Authorization = `Bearer ${data.access}`;
+          return API(original);
         } catch {
-          localStorage.removeItem("access");
-          localStorage.removeItem("refresh");
-          window.location.reload();
+          localStorage.removeItem("casebox_access");
+          localStorage.removeItem("casebox_refresh");
+          window.location.href = "/";
         }
       }
     }
-    return Promise.reject(error);
+    return Promise.reject(err);
   }
 );
 
-export default api;
+export default API;

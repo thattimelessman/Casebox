@@ -10,7 +10,6 @@ class Case(models.Model):
         ("closed", "Closed"),
         ("disposed", "Disposed"),
     )
-
     CASE_TYPE_CHOICES = (
         ("civil", "Civil"),
         ("criminal", "Criminal"),
@@ -21,10 +20,19 @@ class Case(models.Model):
         ("constitutional", "Constitutional"),
         ("other", "Other"),
     )
+    PRIORITY_CHOICES = (
+        ("low", "Low"),
+        ("medium", "Medium"),
+        ("high", "High"),
+        ("urgent", "Urgent"),
+    )
 
     case_no = models.CharField(max_length=100, unique=True)
     case_title = models.CharField(max_length=255)
     case_type = models.CharField(max_length=30, choices=CASE_TYPE_CHOICES, default="civil")
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="medium")
+    tags = models.CharField(max_length=300, blank=True, help_text="Comma-separated tags")
+
     court_name = models.CharField(max_length=255)
     court_city = models.CharField(max_length=100, blank=True)
 
@@ -56,19 +64,14 @@ class Case(models.Model):
     next_hearing_date = models.DateField(null=True, blank=True)
     last_hearing_date = models.DateField(null=True, blank=True)
 
-    last_verdict = models.TextField(blank=True, help_text="Summary of last hearing outcome")
+    last_verdict = models.TextField(blank=True)
     final_verdict = models.TextField(blank=True)
-    case_summary = models.TextField(blank=True, help_text="Brief description of the case")
+    case_summary = models.TextField(blank=True)
 
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="ongoing")
+    progress = models.PositiveSmallIntegerField(default=0)
 
-    # Progress tracking (0-100%)
-    progress = models.PositiveSmallIntegerField(default=0, help_text="Case progress percentage")
-
-    is_visible_to_client = models.BooleanField(
-        default=True,
-        help_text="Admin can hide sensitive cases from client view",
-    )
+    is_visible_to_client = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -96,3 +99,22 @@ class HearingNote(models.Model):
 
     def __str__(self):
         return f"{self.case.case_no} – {self.hearing_date}"
+
+
+class CaseComment(models.Model):
+    """
+    Internal comments visible only to admin and advocates.
+    Clients never see these.
+    """
+    case = models.ForeignKey(Case, related_name="comments", on_delete=models.CASCADE)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True
+    )
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.case.case_no} – comment by {self.author}"
