@@ -67,9 +67,9 @@ export function UsersPage() {
           width:32, height:32, borderRadius:"50%", background:"rgba(74,124,111,0.12)",
           display:"flex", alignItems:"center", justifyContent:"center",
           fontFamily:"'Cormorant Garamond',serif", fontSize:"0.95rem", color:"#4a7c6f", fontWeight:600,
-        }}>{u.first_name?.[0]}</div>
+        }}>{u.first_name?.[0] || u.username?.[0]?.toUpperCase() || "?"}</div>
         <div>
-          <div style={{ fontSize:"0.86rem", fontWeight:500 }}>{u.first_name} {u.last_name}</div>
+          <div style={{ fontSize:"0.86rem", fontWeight:500 }}>{u.first_name || u.username} {u.last_name || ""}</div>
           <div style={{ fontSize:"0.74rem", color:"#7a7a8a" }}>@{u.username}</div>
         </div>
       </div>
@@ -203,7 +203,7 @@ export function PendingApprovalsPage() {
                     width:46, height:46, borderRadius:"50%", background:"rgba(184,146,42,0.12)",
                     display:"flex", alignItems:"center", justifyContent:"center",
                     fontFamily:"'Cormorant Garamond',serif", fontSize:"1.2rem", color:"#b8922a", fontWeight:600,
-                  }}>{u.first_name?.[0]}</div>
+                  }}>{u.first_name?.[0] || u.username?.[0]?.toUpperCase() || "?"}</div>
                   <div style={{ flex:1 }}>
                     <div style={{ fontWeight:500, color:"#1a1a2e", fontSize:"0.95rem" }}>{u.first_name} {u.last_name}</div>
                     <div style={{ fontSize:"0.78rem", color:"#7a7a8a" }}>{u.email} · @{u.username}</div>
@@ -285,7 +285,7 @@ export function AuditLogPage() {
                   width:34, height:34, borderRadius:"50%", background:"rgba(74,124,111,0.12)",
                   display:"flex", alignItems:"center", justifyContent:"center",
                   fontFamily:"'Cormorant Garamond',serif", fontSize:"0.95rem", color:"#4a7c6f", fontWeight:600, flexShrink:0,
-                }}>{log.user_name?.[0] || "?"}</div>
+                }}>{log.user_name?.[0]?.toUpperCase() || "?"}</div>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:"0.84rem", fontWeight:500, color:"#1a1a2e" }}>{log.user_name}</div>
                   <div style={{ fontSize:"0.78rem", color:"#7a7a8a" }}>{log.description}</div>
