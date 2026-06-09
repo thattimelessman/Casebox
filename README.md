@@ -10,7 +10,7 @@ A full-stack legal case management platform for law firms and independent practi
 
 Legal workflows are fragmented by default. Case files live in folders, hearing notes get lost in notebooks, and client visibility into their own cases is either nonexistent or completely uncontrolled. For small firms and solo practitioners, there is no lightweight tool that handles the full picture — case lifecycle with proper legal statuses, per-hearing session notes, internal advocate-only comments hidden from clients, document uploads, and role-gated access — without the overhead of enterprise software.
 
-CaseBox solves this. Every case is tracked with court-specific metadata, assigned to the right people across four roles, and access is enforced at the database query level — not just the UI layer.
+CaseBox helps in solving this issue. Every case is tracked with court-specific metadata, assigned to the right people across four roles, and access is enforced at the database query level — not just the UI layer.
 
 **Key capabilities:**
 - Case management with 5 legal statuses, 8 case types, and 4 priority levels
@@ -416,11 +416,11 @@ Sample response:
 - Cloud storage for documents (S3 / Cloudinary via django-storages)
 - PostgreSQL setup guide and migration scripts
 - Email notifications for hearing reminders and client approval events
-- Case timeline view — visual history of status and progress changes
+- Case timeline view - visual history of status and progress changes
 - Bulk document upload
 - Export case detail to PDF
 - Test coverage for all endpoints and the permission matrix
-- Mobile-responsive layout improvements
+- Mobile-responsive layout improvement
 
 ---
 
