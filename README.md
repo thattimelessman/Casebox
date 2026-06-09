@@ -115,7 +115,7 @@ Casebox/
 │   │   ├── views.py                   # Auth views, user management
 │   │   └── management/commands/
 │   │       └── create_admin.py        # Idempotent admin creation from .env
-│   ├── cases/
+│   ├-─ cases/
 │   │   ├── models.py                  # Case, HearingNote, CaseComment
 │   │   ├── serializers.py             # CaseListSerializer, CaseDetailSerializer,
 │   │   │                              # HearingNoteSerializer, CaseCommentSerializer
